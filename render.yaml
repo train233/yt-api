@@ -3,18 +3,8 @@ services:
     name: yt-api
     runtime: node
     plan: free
-    buildCommand: |
-      apt-get update && apt-get install -y python3 python3-pip
-      curl -fsSL https://deno.land/install.sh | sh
-      export DENO_INSTALL="$HOME/.deno"
-      export PATH="$DENO_INSTALL/bin:$PATH"
-      pip3 install yt-dlp
-      npm install
+    buildCommand: pip3 install yt-dlp && npm install
     startCommand: node server.js
     envVars:
-      - key: DENO_INSTALL
-        value: /opt/render/.deno
-      - key: PATH
-        value: /opt/render/.deno/bin:${PATH}
       - key: POT_SERVER_URL
-        value: https://bgutil-ytdlp-pot-provider-5vse.onrender.com
+        value: https://pot-provider.onrender.com
