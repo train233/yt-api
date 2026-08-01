@@ -10,7 +10,8 @@ const port = process.env.PORT || 3000;
 // ============================================
 // 設定
 // ============================================
-const POTOKEN_SERVER = process.env.POTOKEN_SERVER || 'https://bgutil-ytdlp-pot-provider-rs-1.onrender.com/';
+// Renderの環境変数からPoTokenサーバーURLを取得
+const POT_SERVER_URL = process.env.POT_SERVER_URL || 'https://bgutil-ytdlp-pot-provider-rs-1.onrender.com';
 
 // CORSを許可
 app.use((req, res, next) => {
@@ -21,54 +22,9 @@ app.use((req, res, next) => {
 });
 
 let youtube;
-let cachedPoToken = null;
-let poTokenExpiry = 0;
 
 // ============================================
-// PoTokenを取得（キャッシュ付き）
-// ============================================
-async function getPoToken() {
-  const now = Date.now();
-  if (cachedPoToken && now < poTokenExpiry) {
-    return cachedPoToken;
-  }
-
-  try {
-    // Rust製PoTokenサーバーから取得
-    const res = await fetch(`${POTOKEN_SERVER}/generate`, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    const data = await res.json();
-    
-    if (data.poToken) {
-      cachedPoToken = data.poToken;
-      poTokenExpiry = now + 3600000; // 1時間キャッシュ
-      console.log('✅ PoToken refreshed');
-      return cachedPoToken;
-    }
-    throw new Error('No PoToken in response');
-  } catch (error) {
-    console.error('❌ PoToken fetch failed:', error.message);
-    // 古いキャッシュがあれば返す（期限切れでも）
-    if (cachedPoToken) return cachedPoToken;
-    return null;
-  }
-}
-
-// ============================================
-// yt-dlpでストリームURLを取得（PoToken付き）
-// ============================================
-async function getStreamWithYtDlp(videoId) {
-  const poToken = await getPoToken();
-  
-  // 正しいPoToken渡し方（--extractor-argsを使用）
-  const command = `yt-dlp -g -f "best[ext=mp4]" --extractor-args "youtube:po_token=web.player+${poToken}" https://www.youtube.com/watch?v=${videoId}`;
-  
-  // 以前の--add-headerは削除
-}
-
-// ============================================
-// youtubei.jsで動画情報を取得
+// youtubei.js 初期化
 // ============================================
 async function initYoutube() {
   try {
@@ -79,6 +35,28 @@ async function initYoutube() {
   } catch (error) {
     console.error('❌ YouTube init failed:', error.message);
   }
+}
+
+// ============================================
+// yt-dlpでストリームURLを取得（PoTokenサーバー連携）
+// ============================================
+async function getStreamWithYtDlp(videoId) {
+  // yt-dlpにPoTokenサーバーのURLを渡す
+  const command = `yt-dlp -g -f "best[ext=mp4]" --extractor-args "youtubepot-bgutilhttp:base_url=${POT_SERVER_URL}" https://www.youtube.com/watch?v=${videoId}`;
+  
+  console.log('🔍 Command:', command);
+  
+  return new Promise((resolve, reject) => {
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error('❌ yt-dlp error:', stderr || error.message);
+        reject(new Error('yt-dlp failed: ' + (stderr || error.message)));
+        return;
+      }
+      const urls = stdout.trim().split('\n');
+      resolve(urls[0] || null);
+    });
+  });
 }
 
 // ============================================
@@ -123,9 +101,8 @@ app.get('/api/video', async (req, res) => {
 });
 
 // ============================================
-// API: 検索
+// API: 検索（yt-dlp使用）
 // ============================================
-// server.js - /api/search を yt-dlp で検索する版に置き換え
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) {
@@ -133,11 +110,8 @@ app.get('/api/search', async (req, res) => {
   }
 
   try {
-    // PoTokenを取得
-    const poToken = await getPoToken();
-    
-    // yt-dlpで検索（PoToken付き）
-    const command = `yt-dlp -j --flat-playlist --extractor-args "youtube:po_token=web.player+${poToken}" "ytsearch20:${query}"`;
+    // yt-dlpで検索（PoTokenサーバー連携）
+    const command = `yt-dlp -j --flat-playlist --extractor-args "youtubepot-bgutilhttp:base_url=${POT_SERVER_URL}" "ytsearch20:${query}"`;
     
     exec(command, (error, stdout, stderr) => {
       if (error) {
@@ -187,7 +161,7 @@ app.get('/health', (req, res) => {
 initYoutube().then(() => {
   app.listen(port, '0.0.0.0', () => {
     console.log(`🚀 yt-api server running on port ${port}`);
-    console.log(`🔗 PoToken server: ${POTOKEN_SERVER}`);
+    console.log(`🔗 PoToken server: ${POT_SERVER_URL}`);
   });
 }).catch(err => {
   console.error('❌ Server startup failed:', err);
