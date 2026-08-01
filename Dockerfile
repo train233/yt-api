@@ -1,16 +1,17 @@
 # Dockerfile
 FROM node:20-slim
 
-# 必要なパッケージをインストール（Python + pip + yt-dlp）
+# 必要なパッケージをインストール
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    python3-venv \
     curl \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# yt-dlpをインストール
-RUN pip3 install yt-dlp
+# yt-dlpをインストール（キャッシュ無効化）
+RUN pip3 install --no-cache-dir yt-dlp
 
 # アプリのソースをコピー
 WORKDIR /app
