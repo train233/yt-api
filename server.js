@@ -20,7 +20,18 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type');
   next();
 });
-
+// server.js の app.use の後に追加
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'yt-api is running',
+    endpoints: {
+      video: '/api/video?id=VIDEO_ID',
+      search: '/api/search?q=QUERY',
+      health: '/health'
+    }
+  });
+});
 let youtube;
 
 // ============================================
