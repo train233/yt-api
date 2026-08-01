@@ -61,20 +61,10 @@ async function getPoToken() {
 async function getStreamWithYtDlp(videoId) {
   const poToken = await getPoToken();
   
-  // PoTokenをヘッダーとして渡す
-  const command = `yt-dlp -g -f "best[ext=mp4]" --add-header "Authorization: PoToken ${poToken}" https://www.youtube.com/watch?v=${videoId}`;
+  // 正しいPoToken渡し方（--extractor-argsを使用）
+  const command = `yt-dlp -g -f "best[ext=mp4]" --extractor-args "youtube:po_token=web.player+${poToken}" https://www.youtube.com/watch?v=${videoId}`;
   
-  return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error('❌ yt-dlp error:', stderr || error.message);
-        reject(new Error('yt-dlp failed: ' + (stderr || error.message)));
-        return;
-      }
-      const urls = stdout.trim().split('\n');
-      resolve(urls[0] || null);
-    });
-  });
+  // 以前の--add-headerは削除
 }
 
 // ============================================
