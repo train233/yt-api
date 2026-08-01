@@ -1,12 +1,12 @@
-// yt-api/server.js - 完全版（yt-dlpのみ + タイムアウト + ウォームアップ）
+// yt-api/server.js - PoTokenサーバー連携版（Docker版）
 const express = require('express');
-const { generate } = require('youtube-po-token-generator');
 const { exec } = require('child_process');
 
 const app = express();
 const port = process.env.PORT || 3000;
+const POT_SERVER_URL = process.env.POT_SERVER_URL || 'http://localhost:4416';
 
-// CORSを許可
+// CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -15,55 +15,42 @@ app.use((req, res, next) => {
 });
 
 // ============================================
-// PoToken生成（キャッシュ付き）
+// ルート
 // ============================================
-let cachedPoToken = null;
-let cacheTime = 0;
-const CACHE_DURATION = 3600000; // 1時間
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'yt-api is running',
+    endpoints: {
+      video: '/api/video?id=VIDEO_ID',
+      search: '/api/search?q=QUERY',
+      health: '/health'
+    }
+  });
+});
 
-async function getPoToken() {
-  const now = Date.now();
-  if (cachedPoToken && (now - cacheTime) < CACHE_DURATION) {
-    console.log('✅ Using cached PoToken');
-    return cachedPoToken;
+// ============================================
+// API: 動画情報取得（PoTokenサーバー連携）
+// ============================================
+app.get('/api/video', async (req, res) => {
+  const videoId = req.query.id;
+  if (!videoId) {
+    return res.status(400).json({ error: 'Missing video id' });
   }
 
   try {
-    console.log('🔄 Generating new PoToken...');
-    const result = await generate();
-    cachedPoToken = result.poToken;
-    cacheTime = now;
-    console.log('✅ PoToken generated');
-    return cachedPoToken;
-  } catch (error) {
-    console.error('❌ PoToken generation failed:', error.message);
-    return null;
-  }
-}
+    // yt-dlpにPoTokenサーバーを指定
+    const command = `yt-dlp -j --extractor-args "youtubepot-bgutilhttp:base_url=${POT_SERVER_URL}" https://www.youtube.com/watch?v=${videoId}`;
 
-// ============================================
-// yt-dlpで動画情報を取得（メタデータ + ストリームURL）
-// ============================================
-async function getVideoWithYtDlp(videoId) {
-  const poToken = await getPoToken();
-  if (!poToken) {
-    console.error('❌ No PoToken available');
-    return null;
-  }
-
-  const command = `yt-dlp -j --extractor-args "youtube:po_token=web.player+${poToken}" https://www.youtube.com/watch?v=${videoId}`;
-
-  return new Promise((resolve, reject) => {
     exec(command, (error, stdout, stderr) => {
       if (error) {
         console.error('❌ yt-dlp error:', stderr || error.message);
-        reject(new Error('yt-dlp failed: ' + (stderr || error.message)));
-        return;
+        return res.status(500).json({ error: 'yt-dlp failed' });
       }
 
       try {
         const data = JSON.parse(stdout);
-        resolve({
+        res.json({
           videoId: data.id || videoId,
           title: data.title || 'タイトルなし',
           author: data.uploader || '不明',
@@ -74,50 +61,15 @@ async function getVideoWithYtDlp(videoId) {
           description: data.description || '',
           streamUrl: data.url || null,
           isLive: data.is_live || false,
+          isFrom: 'node-api-ytdlp',
         });
       } catch (parseError) {
         console.error('❌ JSON parse error:', parseError.message);
-        reject(new Error('Failed to parse yt-dlp output'));
+        res.status(500).json({ error: 'Failed to parse yt-dlp output' });
       }
     });
-  });
-}
-
-// ============================================
-// ルート
-// ============================================
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'yt-api is running (yt-dlp only)',
-    endpoints: {
-      video: '/api/video?id=VIDEO_ID',
-      search: '/api/search?q=QUERY',
-      health: '/health'
-    }
-  });
-});
-
-// ============================================
-// API: 動画情報取得
-// ============================================
-app.get('/api/video', async (req, res) => {
-  const videoId = req.query.id;
-  if (!videoId) {
-    return res.status(400).json({ error: 'Missing video id' });
-  }
-
-  try {
-    const result = await getVideoWithYtDlp(videoId);
-    if (!result) {
-      return res.status(500).json({ error: 'Failed to fetch video' });
-    }
-    res.json({
-      ...result,
-      isFrom: 'node-api-ytdlp',
-    });
   } catch (error) {
-    console.error('❌ Error fetching video:', error.message);
+    console.error('❌ Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -132,8 +84,7 @@ app.get('/api/search', async (req, res) => {
   }
 
   try {
-    const poToken = await getPoToken();
-    const command = `yt-dlp -j --flat-playlist --extractor-args "youtube:po_token=web.player+${poToken}" "ytsearch20:${query}"`;
+    const command = `yt-dlp -j --flat-playlist --extractor-args "youtubepot-bgutilhttp:base_url=${POT_SERVER_URL}" "ytsearch20:${query}"`;
 
     exec(command, (error, stdout, stderr) => {
       if (error) {
@@ -157,7 +108,7 @@ app.get('/api/search', async (req, res) => {
               viewCount: data.view_count || 0,
             });
           }
-        } catch (e) { /* パースエラーは無視 */ }
+        } catch (e) { /* 無視 */ }
       }
 
       res.json(results);
@@ -176,18 +127,11 @@ app.get('/health', (req, res) => {
 });
 
 // ============================================
-// サーバー起動（タイムアウト延長 + ウォームアップ）
+// サーバー起動
 // ============================================
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 yt-api running on port ${port}`);
+  console.log(`🔗 PoToken server: ${POT_SERVER_URL}`);
 });
 
-// タイムアウトを120秒に延長
 server.timeout = 120000;
-
-// ウォームアップ（サーバー起動後にPoTokenを事前生成）
-setTimeout(async () => {
-  console.log('🔥 Warming up PoToken...');
-  await getPoToken();
-  console.log('✅ PoToken warmed up');
-}, 5000);
