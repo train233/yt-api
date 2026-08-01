@@ -17,4 +17,4 @@ services:
       - key: PATH
         value: /opt/render/.deno/bin:${PATH}
       - key: POT_SERVER_URL
-        value: https://pot-provider.onrender.com
+        value: https://bgutil-ytdlp-pot-provider-5vse.onrender.com
