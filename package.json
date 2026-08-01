@@ -1,6 +1,6 @@
 {
   "name": "yt-api",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "youtubei.js": "^11.0.0",
     "youtube-po-token-generator": "^0.6.0"
   }
 }
