@@ -4,8 +4,9 @@ services:
     runtime: node
     plan: free
     buildCommand: |
-      pip3 install yt-dlp
-      npm install
+  export TERM=dumb
+  pip3 install yt-dlp
+  npm install
     startCommand: node server.js
     envVars:
       - key: POT_SERVER_URL
