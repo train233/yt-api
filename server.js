@@ -1,4 +1,4 @@
-// yt-api/server.js - youtubei.js を完全に除去した版
+// yt-api/server.js - 完全版（yt-dlpのみ + タイムアウト + ウォームアップ）
 const express = require('express');
 const { generate } = require('youtube-po-token-generator');
 const { exec } = require('child_process');
@@ -51,7 +51,6 @@ async function getVideoWithYtDlp(videoId) {
     return null;
   }
 
-  // -j でJSON出力、-f でストリームURLも取得
   const command = `yt-dlp -j --extractor-args "youtube:po_token=web.player+${poToken}" https://www.youtube.com/watch?v=${videoId}`;
 
   return new Promise((resolve, reject) => {
@@ -73,7 +72,6 @@ async function getVideoWithYtDlp(videoId) {
           viewCount: data.view_count || 0,
           duration: data.duration || 0,
           description: data.description || '',
-          // ストリームURL（best[ext=mp4]）
           streamUrl: data.url || null,
           isLive: data.is_live || false,
         });
@@ -101,7 +99,7 @@ app.get('/', (req, res) => {
 });
 
 // ============================================
-// API: 動画情報取得（yt-dlpのみ）
+// API: 動画情報取得
 // ============================================
 app.get('/api/video', async (req, res) => {
   const videoId = req.query.id;
@@ -125,7 +123,7 @@ app.get('/api/video', async (req, res) => {
 });
 
 // ============================================
-// API: 検索（yt-dlp）
+// API: 検索
 // ============================================
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
@@ -178,8 +176,18 @@ app.get('/health', (req, res) => {
 });
 
 // ============================================
-// サーバー起動
+// サーバー起動（タイムアウト延長 + ウォームアップ）
 // ============================================
-app.listen(port, '0.0.0.0', () => {
+const server = app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 yt-api running on port ${port}`);
 });
+
+// タイムアウトを120秒に延長
+server.timeout = 120000;
+
+// ウォームアップ（サーバー起動後にPoTokenを事前生成）
+setTimeout(async () => {
+  console.log('🔥 Warming up PoToken...');
+  await getPoToken();
+  console.log('✅ PoToken warmed up');
+}, 5000);
