@@ -1,6 +1,6 @@
 {
   "name": "yt-api",
-  "version": "1.0.1",  // ← バージョンを変更
+  "version": "1.0.1",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
