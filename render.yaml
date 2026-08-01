@@ -3,8 +3,11 @@ services:
     name: yt-api
     runtime: node
     plan: free
-    buildCommand: pip3 install yt-dlp && npm install
+    buildCommand: |
+      apt-get update && apt-get install -y ncurses-bin
+      pip3 install yt-dlp
+      npm install
     startCommand: node server.js
     envVars:
       - key: POT_SERVER_URL
-        value: https://pot-provider.onrender.com
+        value: https://bgutil-ytdlp-pot-provider-5vse.onrender.com
