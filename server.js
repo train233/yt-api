@@ -125,38 +125,49 @@ app.get('/api/video', async (req, res) => {
 // ============================================
 // API: 検索
 // ============================================
+// server.js - /api/search を yt-dlp で検索する版に置き換え
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) {
     return res.status(400).json({ error: 'Missing search query' });
   }
 
-  if (!youtube) {
-    return res.status(500).json({ error: 'YouTube API not initialized' });
-  }
-
   try {
-    const searchResults = await youtube.search(query, { type: 'video' });
+    // PoTokenを取得
+    const poToken = await getPoToken();
     
-    let items = [];
-    if (Array.isArray(searchResults)) {
-      items = searchResults;
-    } else if (searchResults?.items && Array.isArray(searchResults.items)) {
-      items = searchResults.items;
-    } else {
-      items = Object.values(searchResults).filter(item => item && typeof item === 'object' && item.id);
-    }
-
-    const results = items.map(item => ({
-      videoId: item.id || '',
-      title: item.title || 'タイトルなし',
-      author: item.author?.name || item.author || '不明',
-      thumbnail: item.thumbnails?.[0]?.url || '',
-      duration: item.duration?.seconds || 0,
-      viewCount: item.views || 0,
-    }));
-
-    res.json(results);
+    // yt-dlpで検索（PoToken付き）
+    const command = `yt-dlp -j --flat-playlist --extractor-args "youtube:po_token=web.player+${poToken}" "ytsearch20:${query}"`;
+    
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error('❌ yt-dlp search error:', stderr || error.message);
+        return res.json([]);
+      }
+      
+      const lines = stdout.trim().split('\n').filter(line => line.trim());
+      const results = [];
+      
+      for (const line of lines) {
+        try {
+          const data = JSON.parse(line);
+          if (data.id) {
+            results.push({
+              videoId: data.id || '',
+              title: data.title || 'タイトルなし',
+              author: data.uploader || '不明',
+              thumbnail: data.thumbnail || '',
+              duration: data.duration || 0,
+              viewCount: data.view_count || 0,
+            });
+          }
+        } catch (e) {
+          // パースエラーは無視
+        }
+      }
+      
+      res.json(results);
+    });
   } catch (error) {
     console.error('❌ Search error:', error.message);
     res.json([]);
