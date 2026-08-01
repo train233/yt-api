@@ -10,7 +10,7 @@ const port = process.env.PORT || 3000;
 // ============================================
 // 設定
 // ============================================
-const POTOKEN_SERVER = process.env.POTOKEN_SERVER || 'https://bgutil-ytdlp-pot-provider-rs-ayxn.onrender.com';
+const POTOKEN_SERVER = process.env.POTOKEN_SERVER || 'https://bgutil-ytdlp-pot-provider-rs-1.onrender.com/';
 
 // CORSを許可
 app.use((req, res, next) => {
