@@ -1,12 +1,12 @@
-// yt-api/server.js - PoTokenサーバー連携版（Docker版）
+// server.js - YouTube APIサーバー（yt-dlp + youtubei.js）
 const express = require('express');
+const { Innertube } = require('youtubei.js');
 const { exec } = require('child_process');
 
 const app = express();
 const port = process.env.PORT || 3000;
-const POT_SERVER_URL = process.env.POT_SERVER_URL || 'http://localhost:4416';
 
-// CORS
+// CORSを許可
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -14,68 +14,68 @@ app.use((req, res, next) => {
   next();
 });
 
-// ============================================
-// ルート
-// ============================================
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'yt-api is running',
-    endpoints: {
-      video: '/api/video?id=VIDEO_ID',
-      search: '/api/search?q=QUERY',
-      health: '/health'
-    }
-  });
-});
+let youtube;
 
-// ============================================
-// API: 動画情報取得（PoTokenサーバー連携）
-// ============================================
+async function initYoutube() {
+  try {
+    youtube = await Innertube.create({
+      generate_session_locally: true,
+    });
+    console.log('✅ YouTube API initialized successfully');
+  } catch (error) {
+    console.error('❌ Failed to initialize YouTube:', error.message);
+  }
+}
+
+// 動画情報を取得するAPI
 app.get('/api/video', async (req, res) => {
   const videoId = req.query.id;
   if (!videoId) {
     return res.status(400).json({ error: 'Missing video id' });
   }
 
+  if (!youtube) {
+    return res.status(500).json({ error: 'YouTube API not initialized' });
+  }
+
   try {
-    // yt-dlpにPoTokenサーバーを指定
-    const command = `yt-dlp -j --extractor-args "youtubepot-bgutilhttp:base_url=${POT_SERVER_URL}" https://www.youtube.com/watch?v=${videoId}`;
-
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error('❌ yt-dlp error:', stderr || error.message);
-        return res.status(500).json({ error: 'yt-dlp failed' });
-      }
-
-      try {
-        const data = JSON.parse(stdout);
-        res.json({
-          videoId: data.id || videoId,
-          title: data.title || 'タイトルなし',
-          author: data.uploader || '不明',
-          authorId: data.channel_id || '',
-          thumbnail: data.thumbnail || '',
-          viewCount: data.view_count || 0,
-          duration: data.duration || 0,
-          description: data.description || '',
-          streamUrl: data.url || null,
-          isLive: data.is_live || false,
-          isFrom: 'node-api-ytdlp',
-        });
-      } catch (parseError) {
-        console.error('❌ JSON parse error:', parseError.message);
-        res.status(500).json({ error: 'Failed to parse yt-dlp output' });
-      }
+    const video = await youtube.getInfo(videoId);
+    
+    const command = `yt-dlp -g -f "best[ext=mp4]" https://www.youtube.com/watch?v=${videoId}`;
+    const streamUrl = await new Promise((resolve, reject) => {
+      exec(command, (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+        } else {
+          const urls = stdout.trim().split('\n');
+          resolve(urls[0] || '');
+        }
+      });
     });
+
+    const result = {
+      videoId: video.basic_info.id,
+      title: video.basic_info.title,
+      author: video.basic_info.author,
+      authorId: video.basic_info.channel_id,
+      thumbnail: video.basic_info.thumbnail,
+      viewCount: video.basic_info.view_count,
+      duration: video.basic_info.duration,
+      description: video.basic_info.short_description,
+      isLive: video.basic_info.is_live,
+      streamUrl: streamUrl,
+      isFrom: 'node-api',
+    };
+    
+    res.json(result);
   } catch (error) {
-    console.error('❌ Error:', error.message);
+    console.error('❌ Error fetching video:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 // ============================================
-// API: 検索
+// ✅ 検索API（yt-dlp版）
 // ============================================
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
@@ -83,55 +83,74 @@ app.get('/api/search', async (req, res) => {
     return res.status(400).json({ error: 'Missing search query' });
   }
 
-  try {
-    const command = `yt-dlp -j --flat-playlist --extractor-args "youtubepot-bgutilhttp:base_url=${POT_SERVER_URL}" "ytsearch20:${query}"`;
-
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error('❌ yt-dlp search error:', stderr || error.message);
-        return res.json([]);
+  const command = `yt-dlp -j --flat-playlist "ytsearch20:${query}"`;
+  
+  exec(command, (error, stdout, stderr) => {
+    if (error) {
+      console.error('❌ yt-dlp search error:', stderr || error.message);
+      return res.json([]);
+    }
+    
+    const lines = stdout.trim().split('\n').filter(function(line) { return line.trim(); });
+    const results = [];
+    
+    for (var i = 0; i < lines.length; i++) {
+      try {
+        var data = JSON.parse(lines[i]);
+        if (data.id) {
+          results.push({
+            videoId: data.id || '',
+            title: data.title || 'タイトルなし',
+            author: data.uploader || '不明',
+            thumbnail: data.thumbnail || `https://img.youtube.com/vi/${data.id}/hqdefault.jpg`,
+            duration: data.duration || 0,
+            viewCount: data.view_count || 0,
+          });
+        }
+      } catch (e) {
+        // パースエラーは無視
       }
+    }
+    
+    res.json(results);
+  });
+});
 
-      const lines = stdout.trim().split('\n').filter(line => line.trim());
-      const results = [];
-
-      for (const line of lines) {
-        try {
-          const data = JSON.parse(line);
-          if (data.id) {
-            results.push({
-              videoId: data.id || '',
-              title: data.title || 'タイトルなし',
-              author: data.uploader || '不明',
-              thumbnail: data.thumbnail || '',
-              duration: data.duration || 0,
-              viewCount: data.view_count || 0,
-            });
-          }
-        } catch (e) { /* 無視 */ }
-      }
-
-      res.json(results);
-    });
-  } catch (error) {
-    console.error('❌ Search error:', error.message);
-    res.json([]);
+// ストリームURL取得API（yt-dlp）
+app.get('/api/stream', async (req, res) => {
+  const videoId = req.query.id;
+  if (!videoId) {
+    return res.status(400).json({ error: 'Missing video id' });
   }
+
+  const command = `yt-dlp -g -f "best[ext=mp4]" https://www.youtube.com/watch?v=${videoId}`;
+  
+  exec(command, (error, stdout, stderr) => {
+    if (error) {
+      console.error('❌ yt-dlp error:', stderr || error.message);
+      return res.status(500).json({ error: 'Failed to get stream URL' });
+    }
+    
+    const urls = stdout.trim().split('\n');
+    const videoUrl = urls[0];
+    
+    if (!videoUrl) {
+      return res.status(500).json({ error: 'No stream URL found' });
+    }
+    
+    res.json({ 
+      url: videoUrl,
+      format: 'mp4',
+      isFrom: 'yt-dlp'
+    });
+  });
 });
 
-// ============================================
-// ヘルスチェック
-// ============================================
-app.get('/health', (req, res) => {
-  res.send('OK');
-});
-
-// ============================================
 // サーバー起動
-// ============================================
-const server = app.listen(port, '0.0.0.0', () => {
-  console.log(`🚀 yt-api running on port ${port}`);
-  console.log(`🔗 PoToken server: ${POT_SERVER_URL}`);
+initYoutube().then(() => {
+  app.listen(port, () => {
+    console.log(`🚀 API server running at http://localhost:${port}`);
+    console.log(`📹 Try: http://localhost:${port}/api/video?id=eLCF6LdkzAQ`);
+    console.log(`🎬 Stream: http://localhost:${port}/api/stream?id=eLCF6LdkzAQ`);
+  });
 });
-
-server.timeout = 120000;
